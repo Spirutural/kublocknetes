@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# mkfloppy -- write the cluster payload onto an in-game floppy disk.
+#
+# OpenComputers filesystems are directories in the world save, so a floppy
+# can be populated from here directly. Walk it to a new machine, run
+# /mnt/xxx/install, and the node is provisioned.
+#
+#   mkfloppy b8024351-bdec-4cb2-b480-b58d5215d88f
+#   mkfloppy <uuid> --list        show what would be written
+#
+# Config:
+#   OCMAIL_HOST   ssh alias of the Minecraft server  (default: mcaws)
+#   OCMAIL_SAVE   path to World/opencomputers
+
+set -euo pipefail
+
+HOST="${OCMAIL_HOST:-mcaws}"
+SAVE="${OCMAIL_SAVE:-/home/ubuntu/GTNH-Server/World/opencomputers}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ $# -lt 1 ]; then
+  echo "usage: mkfloppy <floppy-uuid> [--list]" >&2
+  echo "  find the uuid with: ssh $HOST ls $SAVE" >&2
+  exit 2
+fi
+
+UUID="$1"
+LIST="${2:-}"
+
+# source-in-repo : destination-on-floppy
+PAYLOAD=(
+  "boot/floppy-install.lua:install.lua"
+
+  "lib/wire.lua:lib/wire.lua"
+  "lib/transport.lua:lib/transport.lua"
+  "lib/sshd.lua:lib/sshd.lua"
+  "lib/ssh.lua:lib/ssh.lua"
+  "lib/dropbox.lua:lib/dropbox.lua"
+  "openos/shellexec.lua:lib/shellexec.lua"
+
+  "bin/sshd.lua:bin/sshd.lua"
+  "bin/ssh.lua:bin/ssh.lua"
+  "bin/dropbox.lua:bin/dropbox.lua"
+  "probe/probe.lua:bin/probe.lua"
+  "probe/bench.lua:bin/bench.lua"
+)
+
+if [ "$LIST" = "--list" ]; then
+  total=0
+  printf '%-34s %-24s %s\n' "SOURCE" "ON FLOPPY" "BYTES"
+  for entry in "${PAYLOAD[@]}"; do
+    src="${entry%%:*}"; dst="${entry##*:}"
+    size=$(wc -c < "$REPO/$src")
+    total=$((total + size))
+    printf '%-34s %-24s %s\n' "$src" "$dst" "$size"
+  done
+  echo
+  echo "total: $total bytes"
+  # A tier 1 floppy is 512KB; worth knowing before we find out the hard way.
+  if [ "$total" -gt 524288 ]; then
+    echo "WARNING: exceeds a 512KB floppy" >&2
+  fi
+  exit 0
+fi
+
+DEST="$SAVE/$UUID"
+
+# Refuse to write to something that is not there, rather than silently
+# creating a directory the game will never mount.
+if ! ssh -o BatchMode=yes "$HOST" "test -d '$DEST'"; then
+  echo "mkfloppy: no such filesystem: $DEST" >&2
+  echo "  available:" >&2
+  ssh -o BatchMode=yes "$HOST" "ls '$SAVE'" | sed 's/^/    /' >&2
+  exit 1
+fi
+
+echo "writing payload to $UUID"
+
+# One tar over one ssh connection: far quicker than a write per file, and
+# atomic enough that a dropped link leaves a partial disk rather than a
+# corrupt one.
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+for entry in "${PAYLOAD[@]}"; do
+  src="${entry%%:*}"; dst="${entry##*:}"
+  mkdir -p "$tmpdir/$(dirname "$dst")"
+  cp "$REPO/$src" "$tmpdir/$dst"
+  printf '  %-34s -> %s\n' "$src" "$dst"
+done
+
+# Marker so a machine can tell which mount is ours.
+echo "kublocknetes floppy" > "$tmpdir/.kbx-floppy"
+
+tar -C "$tmpdir" -cf - . | ssh -o BatchMode=yes "$HOST" "tar -C '$DEST' -xf -"
+
+echo
+echo "done. in-game:"
+echo "  ls /mnt              # find the mount point"
+echo "  /mnt/<xxx>/install --probe-only     # tight machines: diagnostics first"
+echo "  /mnt/<xxx>/install                  # everything"
