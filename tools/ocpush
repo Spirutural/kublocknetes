@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+#
+# ocpush -- install the current code onto an in-game machine, from here.
+#
+# This is `kbi` for machines that cannot run it: no internet card needed, no
+# floppy to walk over, no network at all. OpenComputers filesystems are
+# directories in the world save, so we write straight into them.
+#
+#   ocpush b64178fb                 push to a machine (uuid prefix is enough)
+#   ocpush b64178fb --dry-run       show what would change
+#   ocpush --list                   list machine filesystems
+#
+# Everything lands in /usr/lib, /usr/bin and /etc/rc.d. Stale copies of our
+# own files in /lib and /bin are removed, because both directories are on
+# package.path and an old shadowing copy is a genuinely horrible bug to
+# chase: the code you are reading is not the code that ran.
+#
+# Config:
+#   OCMAIL_HOST   ssh alias of the Minecraft server  (default: mcaws)
+#   OCMAIL_SAVE   path to World/opencomputers
+
+set -euo pipefail
+
+HOST="${OCMAIL_HOST:-mcaws}"
+SAVE="${OCMAIL_SAVE:-/home/ubuntu/GTNH-Server/World/opencomputers}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# source-in-repo : destination-on-machine
+PAYLOAD=(
+  "lib/wire.lua:usr/lib/wire.lua"
+  "lib/transport.lua:usr/lib/transport.lua"
+  "lib/naming.lua:usr/lib/naming.lua"
+  "lib/sshd.lua:usr/lib/sshd.lua"
+  "lib/ssh.lua:usr/lib/ssh.lua"
+  "lib/dropbox.lua:usr/lib/dropbox.lua"
+  "openos/shellexec.lua:usr/lib/shellexec.lua"
+
+  "bin/sshd.lua:usr/bin/sshd.lua"
+  "bin/ssh.lua:usr/bin/ssh.lua"
+  "bin/dropbox.lua:usr/bin/dropbox.lua"
+  "probe/probe.lua:usr/bin/probe.lua"
+  "probe/bench.lua:usr/bin/bench.lua"
+
+  "openos/rc.d/kbxsshd.lua:etc/rc.d/kbxsshd.lua"
+  "openos/rc.d/kbxdropbox.lua:etc/rc.d/kbxdropbox.lua"
+)
+
+# Files of ours that may be lurking in the non-canonical locations.
+SHADOWS=(
+  "lib/wire.lua" "lib/transport.lua" "lib/naming.lua" "lib/sshd.lua"
+  "lib/ssh.lua" "lib/dropbox.lua" "lib/shellexec.lua"
+  "bin/sshd.lua" "bin/ssh.lua" "bin/dropbox.lua" "bin/probe.lua" "bin/bench.lua"
+)
+
+if [ "${1:-}" = "--list" ] || [ $# -lt 1 ]; then
+  echo "machine filesystems on $HOST:"
+  ssh -o BatchMode=yes "$HOST" "
+    cd '$SAVE' || exit 1
+    for d in */; do
+      d=\${d%/}
+      [ \"\$d\" = state ] && continue
+      name=\$(cat \"\$d/etc/hostname\" 2>/dev/null || echo '-')
+      size=\$(du -sh \"\$d\" 2>/dev/null | cut -f1)
+      has=\$([ -d \"\$d/boot\" ] && echo 'OS' || echo 'data')
+      printf '  %-40s %-14s %-6s %s\n' \"\$d\" \"\$name\" \"\$size\" \"\$has\"
+    done
+  "
+  echo
+  echo "usage: ocpush <uuid-or-prefix> [--dry-run]"
+  exit 0
+fi
+
+PREFIX="$1"
+DRY="${2:-}"
+
+# Resolve a prefix to exactly one filesystem, or say why not.
+UUID="$(ssh -o BatchMode=yes "$HOST" "cd '$SAVE' && ls -d ${PREFIX}* 2>/dev/null | tr -d '/'" || true)"
+
+if [ -z "$UUID" ]; then
+  echo "ocpush: no filesystem matching '$PREFIX'" >&2
+  exit 1
+fi
+if [ "$(echo "$UUID" | wc -l)" -gt 1 ]; then
+  echo "ocpush: '$PREFIX' is ambiguous:" >&2
+  echo "$UUID" | sed 's/^/    /' >&2
+  exit 1
+fi
+
+DEST="$SAVE/$UUID"
+NAME="$(ssh -o BatchMode=yes "$HOST" "cat '$DEST/etc/hostname' 2>/dev/null" || echo "")"
+
+echo "target $UUID${NAME:+  ($NAME)}"
+
+if [ "$DRY" = "--dry-run" ]; then
+  echo
+  echo "would install:"
+  for entry in "${PAYLOAD[@]}"; do
+    printf '  %s\n' "${entry##*:}"
+  done
+  echo
+  echo "would remove any shadowing copies of:"
+  printf '  %s\n' "${SHADOWS[@]}"
+  exit 0
+fi
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+for entry in "${PAYLOAD[@]}"; do
+  src="${entry%%:*}"; dst="${entry##*:}"
+  mkdir -p "$tmpdir/$(dirname "$dst")"
+  cp "$REPO/$src" "$tmpdir/$dst"
+done
+
+tar -C "$tmpdir" -cf - . | ssh -o BatchMode=yes "$HOST" "tar -C '$DEST' -xf -"
+echo "  installed ${#PAYLOAD[@]} files to /usr and /etc/rc.d"
+
+# Remove shadowing copies only after the new ones are safely in place, so an
+# interrupted push never leaves a machine with no copy at all.
+removed="$(ssh -o BatchMode=yes "$HOST" "
+  cd '$DEST' || exit 0
+  n=0
+  for f in ${SHADOWS[*]}; do
+    if [ -f \"\$f\" ]; then rm -f \"\$f\"; echo \"    removed shadowing \$f\"; n=\$((n+1)); fi
+  done
+")"
+
+if [ -n "$removed" ]; then
+  echo "$removed"
+fi
+
+echo
+echo "done. in-game, to pick up the new code:"
+echo "  rc kbxsshd restart      # or reboot"
+echo "  ssh --list"

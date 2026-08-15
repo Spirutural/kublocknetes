@@ -21,19 +21,56 @@ local shell      = require("shell")
 
 local _, opts = shell.parse(...)
 
--- debug.getinfo gives "@/mnt/xxx/install.lua", which is the only reliable
--- way to find our own floppy: the mount point varies per machine.
-local source = debug.getinfo(1, "S").source
-local ROOT   = source:match("^@(.*)/[^/]+$")
+-- Finding our own floppy is fiddlier than it looks. OpenOS chunk names are
+-- not consistently prefixed and the working directory may be anywhere, so
+-- try three strategies in order of reliability:
+--
+--   1. an explicit --root, which always wins
+--   2. the marker file mkfloppy writes to every floppy, found under /mnt
+--   3. debug.getinfo, accepting either @ or = as the chunkname prefix
+--
+-- Strategy 3 alone used to be the whole implementation. It failed when the
+-- program was invoked by path from another directory -- which is the obvious
+-- way to run it -- because the chunkname did not carry the "@" it assumed.
 
-if not ROOT or not filesystem.exists(ROOT .. "/lib") then
-  io.stderr:write("install: cannot locate the floppy (ran from " ..
-    tostring(source) .. ")\n")
+local function looksLikeFloppy(path)
+  return filesystem.exists(path .. "/.kbx-floppy")
+     and filesystem.exists(path .. "/lib")
+end
+
+local function findRoot()
+  if opts.root then
+    return opts.root, "--root"
+  end
+
+  if filesystem.exists("/mnt") then
+    for name in filesystem.list("/mnt") do
+      local path = "/mnt/" .. name:gsub("/$", "")
+      if looksLikeFloppy(path) then return path, "marker" end
+    end
+  end
+
+  local source = debug.getinfo(1, "S").source or ""
+  local guess  = source:match("^[@=]?(.*)/[^/]+$")
+  if guess and guess ~= "" and filesystem.exists(guess .. "/lib") then
+    return guess, "chunkname"
+  end
+
+  return nil, source
+end
+
+local ROOT, how = findRoot()
+
+if not ROOT then
+  io.stderr:write("install: cannot locate the floppy\n")
+  io.stderr:write("  no .kbx-floppy marker found under /mnt\n")
+  io.stderr:write("  chunkname was: " .. tostring(how) .. "\n")
+  io.stderr:write("  try:  install --root=/mnt/xxx\n")
   return 1
 end
 
 io.write("kublocknetes installer\n")
-io.write("  from    " .. ROOT .. "\n")
+io.write("  from    " .. ROOT .. "  (found by " .. how .. ")\n")
 io.write("  free    " .. computer.freeMemory() .. " bytes\n\n")
 
 local function copyFile(from, to)
