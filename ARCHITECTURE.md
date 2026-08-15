@@ -148,6 +148,17 @@ of executing the handler twice — this is what makes non-idempotent handlers
 safe. And `call` pumps the event loop while waiting, so two nodes calling
 each other simultaneously do not deadlock.
 
+## Node runtime
+
+OpenOS on the control plane permanently; thin custom-runtime nodes revisited
+once `kubectl logs` and node events exist, because until then the shell is
+the only diagnostic path. Full reasoning, including the arguments that
+changed, in [docs/decisions.md](docs/decisions.md) (ADR-0001).
+
+Optionality is preserved mechanically rather than by intent: `lib/` may
+require only `component`, `computer` and `serialization`, enforced by
+`test/runtime_surface_test.lua`.
+
 ## Simulator
 
 `sim/oc.lua` runs many virtual OC machines in one host Lua process. Each is a
