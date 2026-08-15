@@ -58,7 +58,22 @@ also how pod dispatch works for real, so tests exercise the actual mechanism.
 
 ## In-game
 
-Start here, on any machine:
+With an Internet Card, type this once and never type Lua into `edit` again:
+
+```
+wget -f https://raw.githubusercontent.com/Spirutural/kublocknetes/main/boot/install.lua /usr/bin/kbi.lua && kbi
+```
+
+`kbi` syncs every file in [MANIFEST](MANIFEST) — including itself — so from
+then on a push here is one command away from every machine in the cluster.
+
+```
+kbi              install or update everything
+kbi --branch dev pull from another branch
+kbi --list       show what would change, change nothing
+```
+
+Then, on any machine:
 
 ```
 probe            # capabilities, memory, API surface -> /home/probe.txt
