@@ -17,3 +17,8 @@ lib/transport.lua       /usr/lib/transport.lua
 probe/probe.lua         /usr/bin/probe.lua
 probe/probe_me.lua      /usr/bin/probe_me.lua
 probe/bench.lua         /usr/bin/bench.lua
+
+lib/sshd.lua            /usr/lib/sshd.lua
+lib/ssh.lua             /usr/lib/ssh.lua
+bin/sshd.lua            /usr/bin/sshd.lua
+bin/ssh.lua             /usr/bin/ssh.lua
