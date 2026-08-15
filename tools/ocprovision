@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+#
+# ocprovision -- turn a blank in-game disk into a working cluster node.
+#
+# Clones a known-good OpenOS install onto it, pushes the cluster code, names
+# it, and enables the services. One command per rack server, no in-game
+# typing, no floppy.
+#
+#   ocprovision --list
+#   ocprovision 3f9a1c22 --name worker-2
+#   ocprovision 3f9a1c22 --name worker-2 --from cfaca73e
+#   ocprovision cfaca73e --name master --no-clone      # existing machine
+#
+# The clone excludes anything machine-specific: hostname, service config,
+# dropbox contents, tmp. Everything else in an OpenOS install is generic.
+#
+# Config:
+#   OCMAIL_HOST   ssh alias of the Minecraft server  (default: mcaws)
+#   OCMAIL_SAVE   path to World/opencomputers
+
+set -euo pipefail
+
+HOST="${OCMAIL_HOST:-mcaws}"
+SAVE="${OCMAIL_SAVE:-/home/ubuntu/GTNH-Server/World/opencomputers}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+NAME=""
+FROM=""
+TARGET=""
+NO_CLONE=0
+FORCE=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)     ssh -o BatchMode=yes "$HOST" "
+                  cd '$SAVE' || exit 1
+                  printf '  %-40s %-14s %-6s %s\n' UUID HOSTNAME SIZE STATE
+                  for d in */; do
+                    d=\${d%/}
+                    [ \"\$d\" = state ] && continue
+                    n=\$(cat \"\$d/etc/hostname\" 2>/dev/null || echo '-')
+                    s=\$(du -sh \"\$d\" 2>/dev/null | cut -f1)
+                    if [ -d \"\$d/boot\" ]; then st=has-os; else st=BLANK; fi
+                    printf '  %-40s %-14s %-6s %s\n' \"\$d\" \"\$n\" \"\$s\" \"\$st\"
+                  done"
+                exit 0 ;;
+    --name)     NAME="$2"; shift 2 ;;
+    --from)     FROM="$2"; shift 2 ;;
+    --no-clone) NO_CLONE=1; shift ;;
+    --force)    FORCE=1; shift ;;
+    -*)         echo "ocprovision: unknown option $1" >&2; exit 2 ;;
+    *)          TARGET="$1"; shift ;;
+  esac
+done
+
+if [ -z "$TARGET" ] || [ -z "$NAME" ]; then
+  echo "usage: ocprovision <uuid-prefix> --name <hostname> [--from <uuid>] [--no-clone]" >&2
+  echo "       ocprovision --list" >&2
+  exit 2
+fi
+
+# Hostnames become part of how you address machines, so keep them boring.
+if ! echo "$NAME" | grep -qE '^[a-zA-Z][a-zA-Z0-9-]{0,30}$'; then
+  echo "ocprovision: '$NAME' is not a usable hostname" >&2
+  echo "  use letters, digits and dashes, starting with a letter" >&2
+  exit 2
+fi
+
+resolve() {
+  local prefix="$1" found
+  found="$(ssh -o BatchMode=yes "$HOST" "cd '$SAVE' && ls -d ${prefix}* 2>/dev/null | tr -d '/'" || true)"
+  if [ -z "$found" ]; then
+    echo "ocprovision: no filesystem matching '$prefix'" >&2; return 1
+  fi
+  if [ "$(echo "$found" | wc -l)" -gt 1 ]; then
+    echo "ocprovision: '$prefix' is ambiguous:" >&2
+    echo "$found" | sed 's/^/    /' >&2; return 1
+  fi
+  echo "$found"
+}
+
+UUID="$(resolve "$TARGET")"
+DEST="$SAVE/$UUID"
+
+echo "provisioning $UUID as '$NAME'"
+
+HAS_OS="$(ssh -o BatchMode=yes "$HOST" "[ -d '$DEST/boot' ] && echo yes || echo no")"
+
+# ---------------------------------------------------------------- clone ----
+
+if [ "$NO_CLONE" = "0" ] && [ "$HAS_OS" = "no" ]; then
+  if [ -z "$FROM" ]; then
+    FROM="$(ssh -o BatchMode=yes "$HOST" "
+      cd '$SAVE' || exit 1
+      for d in */; do
+        d=\${d%/}
+        [ \"\$d\" = '$UUID' ] && continue
+        if [ -d \"\$d/boot\" ] && [ -d \"\$d/lib\" ]; then echo \"\$d\"; break; fi
+      done")"
+    if [ -z "$FROM" ]; then
+      echo "ocprovision: no OpenOS install to clone from; pass --from" >&2
+      exit 1
+    fi
+  else
+    FROM="$(resolve "$FROM")"
+  fi
+
+  echo "  cloning OpenOS from ${FROM:0:8}"
+
+  # Excludes are the machine-specific bits. Everything else is generic, so a
+  # clone is indistinguishable from a fresh install -- minus the tedium of
+  # doing it four times per rack.
+  ssh -o BatchMode=yes "$HOST" "
+    set -e
+    cd '$SAVE'
+    tar -C '$FROM' -cf - \
+      --exclude='./etc/hostname' \
+      --exclude='./etc/rc.cfg' \
+      --exclude='./home/dropbox' \
+      --exclude='./tmp' \
+      . | tar -C '$UUID' -xf -
+  "
+  echo "  OpenOS installed"
+
+elif [ "$HAS_OS" = "yes" ] && [ "$NO_CLONE" = "0" ] && [ "$FORCE" = "0" ]; then
+  echo "  already has an OS, skipping clone (--force to overwrite)"
+fi
+
+# ----------------------------------------------------------- cluster code --
+
+"$REPO/tools/ocpush" "$UUID" | sed 's/^/  /'
+
+# -------------------------------------------------------------- identity ---
+
+ssh -o BatchMode=yes "$HOST" "
+  set -e
+  printf '%s\n' '$NAME' > '$DEST/etc/hostname'
+  mkdir -p '$DEST/etc'
+  cat > '$DEST/etc/rc.cfg' <<'CFG'
+enabled = {\"kbxsshd\",\"kbxdropbox\"}
+CFG
+"
+
+echo "  hostname: $NAME"
+echo "  services: kbxsshd, kbxdropbox enabled at boot"
+echo
+echo "done. power the machine on (or reboot it) and it joins the cluster."
+echo "verify from any node:  ssh --list"

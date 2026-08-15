@@ -10,21 +10,48 @@ chunks unload, and creepers happen. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Status
 
-Phase 1 of 7. Transport works and is tested. The control plane is next.
+Running on real hardware. Two nodes (`master`, `worker-1`) with working
+remote shell, hostnames and broadcast discovery. The control plane is next.
 
 ```
 $ lua run-tests.lua
-22 passed, 0 failed
+58 passed, 0 failed
 ```
 
 ## Layout
 
 ```
-lib/     cluster code — runs unmodified in-game and in the simulator
+lib/     cluster code — runs unmodified in-game and in the simulator,
+         and may require only component/computer/serialization
+openos/  code that depends on OpenOS, kept out of lib/ deliberately
+bin/     programs that run in-game
 sim/     OpenComputers simulator: many virtual machines in one Lua process
 test/    the suite
+tools/   host-side tooling that reaches into the game
 probe/   scripts to run in-game to discover real hardware and API surface
+docs/    measured hardware facts and architecture decisions
 ```
+
+## The host-side channel
+
+OpenComputers filesystems are directories in the Minecraft world save, and a
+running server picks up files written from outside. So with SSH to the game
+server, any machine's disk is reachable — no internet card, no listening
+port, no config change, and nothing exposed to the network.
+
+```sh
+tools/ocmail 'ls /usr/lib'          # run a command in-game, get its output
+tools/ocpush b64178fb               # install current code onto a machine
+tools/ocprovision --list            # every disk, named or blank
+tools/ocprovision 3f9a --name worker-2   # blank disk -> working node
+tools/mkfloppy <uuid>               # for machines off this server
+```
+
+`ocmail` needs `dropbox` running in-game; the rest need nothing at all.
+
+Provisioning a rack server is one command: it clones a known-good OpenOS
+install, pushes the cluster code, sets the hostname, and enables the
+services. Power it on and it joins.
 
 ## Developing
 
