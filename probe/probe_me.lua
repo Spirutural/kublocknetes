@@ -31,8 +31,25 @@ local function w(fmt, ...)
   out:flush()
 end
 
+-- OC sandboxes collectgarbage and on some builds calling it raises, so
+-- detect what works. Without a forced collection, every measurement below
+-- includes uncollected garbage and reads high -- treat it as an upper bound.
+local gcMode = "unavailable"
+
+if type(collectgarbage) == "function" then
+  if pcall(collectgarbage, "collect") then
+    gcMode = "collect"
+  elseif pcall(collectgarbage) then
+    gcMode = "bare"
+  end
+end
+
 local function gc()
-  for _ = 1, 4 do collectgarbage() end
+  if gcMode == "collect" then
+    for _ = 1, 4 do pcall(collectgarbage, "collect") end
+  elseif gcMode == "bare" then
+    for _ = 1, 4 do pcall(collectgarbage) end
+  end
 end
 
 local function mem()
@@ -64,6 +81,8 @@ w("address       %s", me.address)
 w("mem total     %d bytes", computer.totalMemory())
 w("mem free      %d bytes", mem())
 w("mode          %s", FORCE and "FORCE (unfiltered call permitted)" or "safe")
+w("gc control    %s%s", gcMode,
+  gcMode == "unavailable" and "  (sizes below are upper bounds)" or "")
 
 -- ------------------------------------------------------- capabilities ----
 -- Which of these exist decides the entire ingest strategy: an iterator means

@@ -251,3 +251,33 @@ T.test("a full signal queue drops packets silently", function()
     "overflow dropped packets (dropped=" .. world.stats.dropped .. ")")
   T.ok(victim.dropped > 0, "the victim is the one that dropped them")
 end)
+
+T.describe("sim :: sandbox fidelity")
+
+T.test("denied globals are absent from node sandboxes", function()
+  -- Regression guard. The first thing we learned from real hardware is that
+  -- collectgarbage raises inside OC's sandbox, so library code must never
+  -- reach for it. The simulator has to enforce that or it lies to us.
+  local world = sim.newWorld({ seed = 23 })
+  local node = world:addNode({ name = "n" })
+
+  node:boot(node:loadstring([[
+    SHARED.types = {
+      collectgarbage = type(collectgarbage),
+      dofile         = type(dofile),
+      loadfile       = type(loadfile),
+      -- still present, and relied on throughout lib/
+      load           = type(load),
+      pcall          = type(pcall),
+    }
+  ]], "n"))
+
+  world:run(5)
+
+  local t = world.shared.types
+  T.eq(t.collectgarbage, "nil", "collectgarbage must be withheld")
+  T.eq(t.dofile, "nil", "dofile must be withheld")
+  T.eq(t.loadfile, "nil", "loadfile must be withheld")
+  T.eq(t.load, "function", "load must remain")
+  T.eq(t.pcall, "function", "pcall must remain")
+end)

@@ -88,6 +88,11 @@ function M.newWorld(cfg)
     stepLimit     = cfg.stepLimit or 2000000,
     rng           = rng,
     shared        = {},
+    -- Globals withheld from node sandboxes. The simulator must be at least
+    -- as strict as the real machine, or code passes here and dies in-game.
+    -- collectgarbage is on the list because OC wraps it and calling it
+    -- raises on real hardware -- confirmed in GT:NH, see probe output.
+    deny          = cfg.deny or { "collectgarbage", "dofile", "loadfile" },
     verbose       = cfg.verbose or false,
     stats         = { sent = 0, delivered = 0, lost = 0, dropped = 0 },
   }, World)
@@ -300,6 +305,8 @@ function Node:_env()
   local node = self
   local env = {}
   for k, v in pairs(_G) do env[k] = v end
+
+  for _, name in ipairs(node.world.deny) do env[name] = nil end
 
   env._G = env
   env.require = function(name) return node:_require(name) end
