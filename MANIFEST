@@ -30,3 +30,4 @@ bin/dropbox.lua         /usr/bin/dropbox.lua
 lib/naming.lua          /usr/lib/naming.lua
 openos/rc.d/kbxsshd.lua      /etc/rc.d/kbxsshd.lua
 openos/rc.d/kbxdropbox.lua   /etc/rc.d/kbxdropbox.lua
+bin/kbxreload.lua       /usr/bin/kbxreload.lua

@@ -40,6 +40,7 @@ PAYLOAD=(
   "bin/dropbox.lua:usr/bin/dropbox.lua"
   "probe/probe.lua:usr/bin/probe.lua"
   "probe/bench.lua:usr/bin/bench.lua"
+  "bin/kbxreload.lua:usr/bin/kbxreload.lua"
 
   "openos/rc.d/kbxsshd.lua:etc/rc.d/kbxsshd.lua"
   "openos/rc.d/kbxdropbox.lua:etc/rc.d/kbxdropbox.lua"
@@ -49,7 +50,7 @@ PAYLOAD=(
 SHADOWS=(
   "lib/wire.lua" "lib/transport.lua" "lib/naming.lua" "lib/sshd.lua"
   "lib/ssh.lua" "lib/dropbox.lua" "lib/shellexec.lua"
-  "bin/sshd.lua" "bin/ssh.lua" "bin/dropbox.lua" "bin/probe.lua" "bin/bench.lua"
+  "bin/sshd.lua" "bin/ssh.lua" "bin/dropbox.lua" "bin/probe.lua" "bin/bench.lua" "bin/kbxreload.lua"
 )
 
 if [ "${1:-}" = "--list" ] || [ $# -lt 1 ]; then

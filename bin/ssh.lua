@@ -23,15 +23,31 @@ if opts.list then
   local t_ = transport_.new({ port = tonumber(opts.port) or 22 }):open()
 
   local machines = naming_.list(t_, { timeout = tonumber(opts.timeout) or 2 })
-  if #machines == 0 then
+
+  -- A broadcast never loops back to its sender, so this machine can never
+  -- discover itself. Add it explicitly: a cluster listing that omits the
+  -- machine you are standing on is a listing you cannot trust.
+  local selfName
+  do
+    local f = io.open("/etc/hostname", "r")
+    if f then selfName = f:read("l"); f:close() end
+    if selfName == "" then selfName = nil end
+  end
+
+  if #machines == 0 and not selfName then
     print("no named machines answered")
-    print("set one with:  hostname <name>   (then restart sshd)")
+    print("set one with:  hostname <name>   (then: rc kbxsshd restart)")
     return 0
   end
 
-  print(string.format("%-20s %s", "HOSTNAME", "ADDRESS"))
+  print(string.format("%-20s %-40s %s", "HOSTNAME", "ADDRESS", ""))
+  if selfName then
+    local addr = component.isAvailable("modem")
+      and component.getPrimary("modem").address or "-"
+    print(string.format("%-20s %-40s %s", selfName, addr, "(this machine)"))
+  end
   for _, m in ipairs(machines) do
-    print(string.format("%-20s %s", m.name, m.address))
+    print(string.format("%-20s %-40s %s", m.name, m.address, ""))
   end
   return 0
 end

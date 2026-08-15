@@ -45,6 +45,7 @@ PAYLOAD=(
   "bin/dropbox.lua:bin/dropbox.lua"
   "probe/probe.lua:bin/probe.lua"
   "probe/bench.lua:bin/bench.lua"
+  "bin/kbxreload.lua:bin/kbxreload.lua"
 
   "openos/rc.d/kbxsshd.lua:rc.d/kbxsshd.lua"
   "openos/rc.d/kbxdropbox.lua:rc.d/kbxdropbox.lua"
