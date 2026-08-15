@@ -8,6 +8,7 @@ local T = require("test.init")
 require("test.wire_test")
 require("test.transport_test")
 require("test.sshd_test")
+require("test.dropbox_test")
 require("test.runtime_surface_test")
 
 T.report()

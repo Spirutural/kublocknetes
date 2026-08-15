@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# ocmail -- run a command on an in-game OpenComputers machine, from here.
+#
+# Writes a job file straight into the OC machine's filesystem in the world
+# save, waits for the dropbox agent to answer, prints the result. There is no
+# network path into the game at all: the whole channel is the save directory.
+#
+#   ocmail 'ls /usr/lib'
+#   ocmail 'cat /home/probe.txt'
+#   echo 'free' | ocmail -
+#
+# Config via environment:
+#   OCMAIL_HOST     ssh alias of the Minecraft server   (default: mcaws)
+#   OCMAIL_MACHINE  OC filesystem uuid of the target
+#   OCMAIL_TIMEOUT  seconds to wait for a reply         (default: 30)
+#
+# Requires `dropbox` running in-game on the target machine.
+
+set -euo pipefail
+
+HOST="${OCMAIL_HOST:-mcaws}"
+SAVE="${OCMAIL_SAVE:-/home/ubuntu/GTNH-Server/World/opencomputers}"
+MACHINE="${OCMAIL_MACHINE:-cfaca73e-2180-4a55-826c-209f48712d42}"
+BASE="${OCMAIL_BASE:-$SAVE/$MACHINE/home/dropbox}"
+TIMEOUT="${OCMAIL_TIMEOUT:-30}"
+
+if [ $# -lt 1 ]; then
+  cat >&2 <<'USAGE'
+usage: ocmail '<command>'
+       echo '<command>' | ocmail -
+
+  OCMAIL_HOST     ssh alias            (default: mcaws)
+  OCMAIL_MACHINE  OC filesystem uuid
+  OCMAIL_TIMEOUT  reply timeout, secs  (default: 30)
+USAGE
+  exit 2
+fi
+
+if [ "$1" = "-" ]; then
+  CMD="$(cat)"
+else
+  CMD="$*"
+fi
+
+# Job ids sort lexically in submission order, so the agent drains FIFO.
+ID="$(date -u +%Y%m%d-%H%M%S)-$$"
+
+# The command travels base64-encoded in the environment rather than on stdin,
+# which keeps stdin free for the remote script and sidesteps every quoting
+# hazard in commands containing quotes, newlines or shell metacharacters.
+CMD_B64="$(printf '%s' "$CMD" | base64 | tr -d '\n')"
+
+# A single round trip: write the job, then wait for the answer server-side
+# rather than reconnecting once per poll.
+ssh -o BatchMode=yes "$HOST" \
+  "BASE='$BASE' ID='$ID' TIMEOUT='$TIMEOUT' CMD_B64='$CMD_B64' MACHINE='$MACHINE' bash -s" \
+  <<'REMOTE'
+set -euo pipefail
+
+mkdir -p "$BASE/in" "$BASE/out"
+
+# Written to a .part name and renamed into place: the agent must never be
+# able to read a half-written command.
+printf '%s' "$CMD_B64" | base64 -d > "$BASE/in/$ID.part"
+mv "$BASE/in/$ID.part" "$BASE/in/$ID"
+
+deadline=$(( $(date +%s) + TIMEOUT ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if [ -f "$BASE/out/$ID" ]; then
+    # The agent's first line is an exit:N header; the rest is output.
+    code="$(head -1 "$BASE/out/$ID" | sed -n 's/^exit:\([0-9]*\)$/\1/p')"
+    tail -n +2 "$BASE/out/$ID"
+    rm -f "$BASE/out/$ID"
+    exit "${code:-0}"
+  fi
+  sleep 0.5
+done
+
+echo "ocmail: timed out after ${TIMEOUT}s waiting for a reply" >&2
+echo "        is 'dropbox' running in-game on $MACHINE ?" >&2
+rm -f "$BASE/in/$ID" 2>/dev/null || true
+exit 1
+REMOTE

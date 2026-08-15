@@ -41,49 +41,10 @@ local function makeDigest()
 end
 
 -- ----------------------------------------------------------- executor ----
--- Captures stdout by way of the shell's own redirection, which is the part
--- we can rely on. stderr is captured by swapping io.stderr for the duration;
--- programs that cached a reference to the original stream at load time will
--- still leak to the local screen. Good enough to read logs with.
+-- Shared with the dropbox agent; lives in openos/ because it depends on
+-- OpenOS's shell and would need rewriting for a custom node runtime.
 
-local function execute(cmd)
-  local outPath = "/tmp/.sshd-out"
-  local errPath = "/tmp/.sshd-err"
-
-  local errFile = io.open(errPath, "w")
-  local savedStderr = io.stderr
-  if errFile then io.stderr = errFile end
-
-  local ok, reason = pcall(shell.execute, cmd .. " > " .. outPath)
-
-  io.stderr = savedStderr
-  if errFile then errFile:close() end
-
-  local parts = {}
-
-  local f = io.open(outPath, "r")
-  if f then
-    parts[#parts + 1] = f:read("a") or ""
-    f:close()
-  end
-
-  local e = io.open(errPath, "r")
-  if e then
-    local errText = e:read("a")
-    e:close()
-    if errText and #errText > 0 then parts[#parts + 1] = errText end
-  end
-
-  local code = 0
-  if not ok then
-    parts[#parts + 1] = "sshd: " .. tostring(reason)
-    code = 1
-  elseif reason == false then
-    code = 1
-  end
-
-  return table.concat(parts), code
-end
+local execute = require("shellexec")
 
 -- --------------------------------------------------------------- boot ----
 
