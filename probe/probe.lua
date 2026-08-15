@@ -33,8 +33,19 @@ local function w(fmt, ...)
   out:write(line, "\n")
 end
 
+--- True for functions and for callable tables.
+--  component.proxy() does NOT return plain functions: each method is a table
+--  with __call plus a __tostring that yields its docstring, which is how
+--  `print(component.gpu.setResolution)` prints documentation. Any guard that
+--  tests for type == "function" silently skips every component method.
+local function callable(v)
+  if type(v) == "function" then return true end
+  local mt = getmetatable(v)
+  return type(mt) == "table" and mt.__call ~= nil
+end
+
 local function try(fn, ...)
-  if type(fn) ~= "function" then return nil, "not a function" end
+  if not callable(fn) then return nil, "not callable" end
   local ok, v = pcall(fn, ...)
   if ok then return v end
   return nil, v

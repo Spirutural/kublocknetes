@@ -109,24 +109,36 @@ neighbours — there is no cgroup. Mitigations, in order of usefulness:
 ## Fencing
 
 A pod that allocates without yielding takes its node down, and no software
-watchdog on that node survives to fix it. So fencing must be *out of band*:
-run each node's power through a redstone-controlled feed the control plane
-can toggle. That is an IPMI power cycle, and it is the difference between a
-cluster that self-heals and one you walk to.
+watchdog on that node survives to fix it. So fencing must be *out of band*.
+
+The `computer` component provides exactly that, and it is better than the
+redstone-gated power feed originally planned here. Machines connected by
+cable see each other as `computer` components exposing `start()`, `stop()`
+and `isRunning()`, and the state change is applied by the mod rather than by
+the target's Lua VM — so `stop()` works on a machine wedged in a loop that
+will never yield again. A real BMC, in software.
+
+Redstone-gated power remains the backstop for a node unreachable on the
+network entirely. See [docs/hardware.md](docs/hardware.md).
 
 ## Transport
 
 `lib/wire.lua` — framing. `lib/transport.lua` — RPC.
 
-Three OC facts drive the design:
+Three OC facts drive the design, now measured rather than assumed
+([docs/hardware.md](docs/hardware.md)):
 
-1. **Packets are size-capped** (typically 8192 bytes) with a cap on values
-   per send. Messages are chunked and reassembled.
+1. **Packets cap at 8192 bytes.** Messages are chunked and reassembled.
 2. **Signal queues are bounded** (typically 256) and overflow **silently**.
    There is no error anywhere. Reassembly therefore assumes chunks arrive
    out of order, duplicated, or never, and never grows unboundedly waiting.
-3. **Indirect component calls cost a tick each.** Any loop touching a
-   component per iteration is far more expensive than it looks.
+3. **`modem.send` is an indirect call**, so the machine yields and resumes a
+   later tick — per packet. Packet *count*, not byte count, is the binding
+   constraint on throughput. Run `bench` to get the number for your hardware.
+
+Point 3 is the one that shapes everything above the transport: the control
+plane must be stingy with messages, not merely with bytes. Batch, pack, and
+prefer one full packet to three sparse ones.
 
 Retry is whole-message rather than per-chunk: a chunk lost to queue overflow
 almost certainly took its siblings with it, so chunk-level acknowledgement
@@ -165,10 +177,22 @@ will never catch a genuine OOM. Only the game can tell you that.
 
 ## Open questions
 
-Answered by running `probe/probe.lua` in-game:
+Answered — see [docs/hardware.md](docs/hardware.md):
 
-- OpenComputers version, and whether OpenOS ships the `thread` API — decides
-  whether pods can be coroutines or need a hand-rolled loop over `pullSignal`.
-- Real `maxPacketSize` and values-per-send cap.
-- T3 server rack capacity: RAM slots, CPU tier, component buses.
-- Which component calls are direct vs indirect.
+- ~~Does OpenOS ship the `thread` API?~~ Yes. Pods can be coroutines.
+- ~~Real `maxPacketSize`?~~ 8192.
+- ~~Which component calls are direct vs indirect?~~ `modem.send` is indirect;
+  packet count is the throughput ceiling.
+- ~~Is `collectgarbage` available?~~ No. Memory readings are upper bounds.
+
+Still open:
+
+- **T3 server rack capacity** — RAM slots, CPU tier, component buses. Decides
+  how many nodes a rack is worth and what the scheduler is packing against.
+- **Do rack servers expose `computer` components to each other?** Decides
+  whether fencing is pure software or needs redstone after all.
+- **Measured cost of an indirect call** — run `bench`. Sets the control
+  plane's message budget.
+- **ME component API shape** — whether `allItems()` exists, or only
+  `getItemsInNetwork(filter)`. Decides streaming vs sharded scan. Blocked on
+  inventory controllers being wired up.

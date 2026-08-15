@@ -276,8 +276,40 @@ T.test("denied globals are absent from node sandboxes", function()
 
   local t = world.shared.types
   T.eq(t.collectgarbage, "nil", "collectgarbage must be withheld")
-  T.eq(t.dofile, "nil", "dofile must be withheld")
-  T.eq(t.loadfile, "nil", "loadfile must be withheld")
   T.eq(t.load, "function", "load must remain")
   T.eq(t.pcall, "function", "pcall must remain")
+  -- OpenOS really does provide these; the sim must not be stricter than real.
+  T.eq(t.dofile, "function", "dofile exists in OpenOS")
+  T.eq(t.loadfile, "function", "loadfile exists in OpenOS")
+end)
+
+T.test("component proxy methods are callable tables, not functions", function()
+  -- Regression guard for a real-hardware discovery: OC's component.proxy
+  -- returns tables with __call, so a `type(x) == "function"` guard skips
+  -- every component method. The first probe reported a nil maxPacketSize on
+  -- a modem that plainly had one, for exactly this reason.
+  local world = sim.newWorld({ seed = 29 })
+  local node = world:addNode({ name = "n" })
+
+  node:boot(node:loadstring([==[
+    local component = require("component")
+    local modem = component.getPrimary("modem")
+
+    SHARED.methodType = type(modem.maxPacketSize)
+    SHARED.isCallable = getmetatable(modem.maxPacketSize).__call ~= nil
+    SHARED.value      = modem.maxPacketSize()
+    SHARED.doc        = tostring(modem.maxPacketSize)
+
+    -- The guard that broke in-game must break here too.
+    SHARED.namingBug  = (type(modem.maxPacketSize) == "function")
+  ]==], "n"))
+
+  world:run(5)
+
+  T.eq(world.shared.methodType, "table", "proxy method is a table")
+  T.ok(world.shared.isCallable, "and it has __call")
+  T.eq(world.shared.value, 8192, "calling it still works")
+  T.ok(tostring(world.shared.doc):find("function"), "tostring yields docs")
+  T.eq(world.shared.namingBug, false,
+    "a type=='function' guard must fail, as it does on real hardware")
 end)

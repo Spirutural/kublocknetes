@@ -88,11 +88,15 @@ function M.newWorld(cfg)
     stepLimit     = cfg.stepLimit or 2000000,
     rng           = rng,
     shared        = {},
-    -- Globals withheld from node sandboxes. The simulator must be at least
-    -- as strict as the real machine, or code passes here and dies in-game.
-    -- collectgarbage is on the list because OC wraps it and calling it
-    -- raises on real hardware -- confirmed in GT:NH, see probe output.
-    deny          = cfg.deny or { "collectgarbage", "dofile", "loadfile" },
+    -- Globals withheld from node sandboxes, matched to a real GT:NH machine
+    -- (see docs/hardware.md). collectgarbage is simply absent there, so any
+    -- library code reaching for it must fail here too.
+    --
+    -- Not denied, because OpenOS really does provide them: dofile, loadfile,
+    -- debug.traceback, debug.getinfo, utf8, string.pack, table.move.
+    -- Already absent in host Lua 5.3, so needing no help: loadstring, unpack,
+    -- coroutine.close.
+    deny          = cfg.deny or { "collectgarbage" },
     verbose       = cfg.verbose or false,
     stats         = { sent = 0, delivered = 0, lost = 0, dropped = 0 },
   }, World)
@@ -426,9 +430,22 @@ end
 function Node:_module_component()
   local node = self
 
+  -- Real OC proxy methods are callable TABLES, not functions: they carry a
+  -- __call plus a __tostring returning the method's documentation, which is
+  -- why `print(component.gpu.setResolution)` prints docs in OpenOS.
+  --
+  -- Modelling this faithfully matters. Handing out plain functions here lets
+  -- `type(m.send) == "function"` guards pass in tests and then silently skip
+  -- every component call in-game -- which is exactly how the first probe
+  -- reported a nil maxPacketSize on a modem that had one.
   local function proxyFor(entry)
     local proxy = { address = entry.address, type = entry.type }
-    for name, fn in pairs(entry.methods) do proxy[name] = fn end
+    for name, fn in pairs(entry.methods) do
+      proxy[name] = setmetatable({}, {
+        __call     = function(_, ...) return fn(...) end,
+        __tostring = function() return "function -- " .. name end,
+      })
+    end
     return proxy
   end
 
