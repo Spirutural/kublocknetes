@@ -1,0 +1,15 @@
+# kublocknetes install manifest
+#
+#   <source path in repo>   <destination on the OC machine>
+#
+# Destinations matter:
+#   /usr/lib  is on OpenOS's package.path, so require("wire") just works
+#   /usr/bin  is on PATH, so `probe` runs as a command
+#
+# Lines starting with # are comments. Blank lines are ignored.
+
+lib/wire.lua            /usr/lib/wire.lua
+lib/transport.lua       /usr/lib/transport.lua
+
+probe/probe.lua         /usr/bin/probe.lua
+probe/probe_me.lua      /usr/bin/probe_me.lua
