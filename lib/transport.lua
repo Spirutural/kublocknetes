@@ -30,6 +30,14 @@ local wire          = require("wire")
 
 local transport = {}
 
+--- Sentinel a handler may return to decline to answer at all.
+--  Essential for broadcasts: without it, asking "who is called kubelet-1?"
+--  draws an error reply from every machine that isn't, which is both a
+--  packet storm and a pile of useless results to filter.
+transport.NO_REPLY = setmetatable({}, {
+  __tostring = function() return "NO_REPLY" end,
+})
+
 local T = {}
 T.__index = T
 
@@ -130,6 +138,9 @@ function T:_dispatch(from, env)
     else
       local ok, result = pcall(handler, env.a, { from = from, transport = self })
       if ok then
+        -- Declining to answer must not be cached either: a later, matching
+        -- query with a recycled id would otherwise get the silence replayed.
+        if result == transport.NO_REPLY then return end
         reply = { k = "res", id = env.id, r = result }
       else
         reply = { k = "err", id = env.id, e = tostring(result) }
@@ -142,7 +153,14 @@ function T:_dispatch(from, env)
 
   elseif env.k == "res" or env.k == "err" then
     local waiter = self.pending[env.id]
-    if waiter then
+    if not waiter then return end
+
+    -- A discovery waits for many answers; a call waits for one.
+    if waiter.multi then
+      if env.k == "res" then
+        waiter.replies[#waiter.replies + 1] = { from = from, result = env.r }
+      end
+    else
       waiter.done   = true
       waiter.result = env.r
       waiter.err    = env.e
@@ -184,6 +202,35 @@ function T:serve(duration)
       self:pump(1)
     end
   end
+end
+
+--- Broadcast a request and collect every answer within the timeout.
+--  Returns a list of { from = address, result = value }.
+--
+--  Unlike `call` this never retries: a discovery that finds nothing is a
+--  normal outcome, not a failure, and the caller sweeps again later.
+--  Handlers that have nothing to say should return transport.NO_REPLY.
+--
+--  opts.timeout  seconds to listen for replies
+--  opts.first    stop at the first answer instead of waiting out the window
+function T:discover(method, args, opts)
+  opts = opts or {}
+  local timeout = opts.timeout or 2
+
+  local id = self:_nextId()
+  local waiter = { multi = true, replies = {} }
+  self.pending[id] = waiter
+
+  self:_transmit(nil, { k = "req", id = id, m = method, a = args }, id .. "/b")
+
+  local deadline = computer.uptime() + timeout
+  while computer.uptime() < deadline do
+    self:pump(deadline - computer.uptime())
+    if opts.first and #waiter.replies > 0 then break end
+  end
+
+  self.pending[id] = nil
+  return waiter.replies
 end
 
 --- Call a method on a remote node. Blocks (yielding) until reply or timeout.

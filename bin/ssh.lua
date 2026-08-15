@@ -12,16 +12,38 @@ local shell     = require("shell")
 
 local transport = require("transport")
 local ssh       = require("ssh")
+local naming    = require("naming")
 
 local args, opts = shell.parse(...)
 
+-- `ssh --list` takes no target, so it is handled before the usage check.
+if opts.list then
+  local naming_   = require("naming")
+  local transport_ = require("transport")
+  local t_ = transport_.new({ port = tonumber(opts.port) or 22 }):open()
+
+  local machines = naming_.list(t_, { timeout = tonumber(opts.timeout) or 2 })
+  if #machines == 0 then
+    print("no named machines answered")
+    print("set one with:  hostname <name>   (then restart sshd)")
+    return 0
+  end
+
+  print(string.format("%-20s %s", "HOSTNAME", "ADDRESS"))
+  for _, m in ipairs(machines) do
+    print(string.format("%-20s %s", m.name, m.address))
+  end
+  return 0
+end
+
 if #args < 1 then
-  print("usage: ssh <address> [command...]")
-  print("       ssh <address> --secret <secret>")
+  print("usage: ssh <hostname|address> [command...]")
+  print("       ssh <hostname|address> --secret <secret>")
+  print("       ssh --list                 show every named machine")
   return 1
 end
 
-local host = args[1]
+local target = args[1]
 
 local function makeDigest()
   if not component.isAvailable("data") then return nil end
@@ -38,6 +60,13 @@ local t = transport.new({
   timeout = tonumber(opts.timeout) or 3,
   retries = 4,
 }):open()
+
+-- A hostname costs one broadcast to resolve; an address costs nothing.
+local host, resolveErr = naming.lookup(t, target)
+if not host then
+  io.stderr:write("ssh: " .. tostring(resolveErr) .. "\n")
+  return 1
+end
 
 local session, err = ssh.connect(t, host, {
   secret = opts.secret,
@@ -71,11 +100,14 @@ if #args > 1 then
 end
 
 -- Interactive form.
-print(string.format("connected to %s (auth: %s)", session.remote, session.mode))
+print(string.format("connected to %s%s (auth: %s)",
+  session.hostname or session.remote:sub(1, 8),
+  session.hostname and (" [" .. session.remote:sub(1, 8) .. "]") or "",
+  session.mode))
 print("type 'exit' to disconnect")
 
 while true do
-  io.write(host:sub(1, 8) .. "# ")
+  io.write((session.hostname or host:sub(1, 8)) .. "# ")
   local line = io.read()
   if line == nil or line == "exit" then break end
   if line:match("%S") then run(line) end

@@ -42,6 +42,7 @@ function ssh.connect(transport, host, opts)
     mode      = hello.mode,
     protocol  = hello.protocol,
     remote    = hello.host,
+    hostname  = hello.hostname,
     nonce     = hello.nonce,
     secret    = opts.secret,
     digest    = opts.digest,

@@ -34,6 +34,7 @@ PAYLOAD=(
 
   "lib/wire.lua:lib/wire.lua"
   "lib/transport.lua:lib/transport.lua"
+  "lib/naming.lua:lib/naming.lua"
   "lib/sshd.lua:lib/sshd.lua"
   "lib/ssh.lua:lib/ssh.lua"
   "lib/dropbox.lua:lib/dropbox.lua"
@@ -44,6 +45,9 @@ PAYLOAD=(
   "bin/dropbox.lua:bin/dropbox.lua"
   "probe/probe.lua:bin/probe.lua"
   "probe/bench.lua:bin/bench.lua"
+
+  "openos/rc.d/kbxsshd.lua:rc.d/kbxsshd.lua"
+  "openos/rc.d/kbxdropbox.lua:rc.d/kbxdropbox.lua"
 )
 
 if [ "$LIST" = "--list" ]; then

@@ -49,6 +49,9 @@ function sshd.new(opts)
     executor    = opts.executor,
     secret      = opts.secret,
     digest      = opts.digest,
+    -- Called per request rather than captured, so renaming a live machine
+    -- takes effect without restarting the daemon.
+    hostnameFn  = opts.hostname or function() return nil end,
 
     maxOutput   = opts.maxOutput or 32768,
     maxFailures = opts.maxFailures or 5,
@@ -150,6 +153,7 @@ function S:_hello(_, ctx)
     protocol = PROTOCOL,
     mode     = self:mode(),
     host     = computer.address(),
+    hostname = self.hostnameFn(),
     nonce    = self.secret and self:_issueNonce(ctx.from) or nil,
   }
 end

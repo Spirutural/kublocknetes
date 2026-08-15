@@ -26,3 +26,7 @@ bin/ssh.lua             /usr/bin/ssh.lua
 lib/dropbox.lua         /usr/lib/dropbox.lua
 openos/shellexec.lua    /usr/lib/shellexec.lua
 bin/dropbox.lua         /usr/bin/dropbox.lua
+
+lib/naming.lua          /usr/lib/naming.lua
+openos/rc.d/kbxsshd.lua      /etc/rc.d/kbxsshd.lua
+openos/rc.d/kbxdropbox.lua   /etc/rc.d/kbxdropbox.lua

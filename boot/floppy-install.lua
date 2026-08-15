@@ -94,20 +94,29 @@ if probeOnly then
   io.write("probe-only mode: installing diagnostics, nothing else\n\n")
 end
 
-local libCopied,  libFailed  = copyTree(ROOT .. "/lib", "/usr/lib",
+local libCopied, libFailed = copyTree(ROOT .. "/lib", "/usr/lib",
   probeOnly and function() return false end or nil)
-local binCopied,  binFailed  = copyTree(ROOT .. "/bin", "/usr/bin", filter)
+local binCopied, binFailed = copyTree(ROOT .. "/bin", "/usr/bin", filter)
+
+-- rc.d services, so the node comes back on its own after a reboot.
+local rcCopied, rcFailed = 0, 0
+if not probeOnly then
+  rcCopied, rcFailed = copyTree(ROOT .. "/rc.d", "/etc/rc.d")
+end
 
 io.write(string.format("\n%d installed, %d failed\n",
-  libCopied + binCopied, libFailed + binFailed))
+  libCopied + binCopied + rcCopied, libFailed + binFailed + rcFailed))
 io.write(string.format("free memory now %d bytes\n", computer.freeMemory()))
 
 if probeOnly then
   io.write("\nrun:  probe\n")
   io.write("then read /home/probe.txt before installing the rest.\n")
 else
-  io.write("\nrun:  probe        to check this machine\n")
-  io.write("      sshd --secret <secret>\n")
+  io.write("\nnext:\n")
+  io.write("  hostname <name>              name this machine\n")
+  io.write("  rc kbxsshd enable            start sshd at boot\n")
+  io.write("  rc kbxdropbox enable         start the file channel at boot\n")
+  io.write("  rc kbxsshd start             or just start it now\n")
 end
 
 return 0

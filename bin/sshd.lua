@@ -18,6 +18,21 @@ local computer  = require("computer")
 
 local transport = require("transport")
 local sshd      = require("sshd")
+local naming    = require("naming")
+
+-- --------------------------------------------------------- hostname ----
+-- /etc/hostname is OpenOS's own convention, written by the stock `hostname`
+-- program, so we inherit it rather than inventing a parallel one. Re-read
+-- per call so `hostname foo` takes effect on a running daemon.
+
+local function hostname()
+  local f = io.open("/etc/hostname", "r")
+  if not f then return nil end
+  local name = f:read("l")
+  f:close()
+  if not name or name == "" then return nil end
+  return name
+end
 
 local _, opts = shell.parse(...)
 
@@ -57,10 +72,17 @@ local server = sshd.new({
   executor  = execute,
   secret    = opts.secret,
   digest    = digest,
+  hostname  = hostname,
   maxOutput = tonumber(opts.maxoutput) or 32768,
 }):install()
 
-print(string.format("sshd on port %d, host %s", PORT, computer.address()))
+-- Answer "who is <name>" on the same port, so `ssh <name>` works without a
+-- registry or a second daemon.
+naming.serve(t, hostname)
+
+print(string.format("sshd on port %d", PORT))
+print(string.format("host %s  %s", computer.address(),
+  hostname() and ("(" .. hostname() .. ")") or "(no hostname -- set one with: hostname <name>)"))
 print(string.format("auth: %s%s", server:mode(),
   digest and "  (Data Card present)" or ""))
 
